@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from "vue-router";
 
 const routes = [{
     path: '/',
-    redirect: '/employee'
+    redirect: '/login'
 },
 {
     path: '/employee',
@@ -13,6 +13,11 @@ const routes = [{
     path: '/OldGetData',
     name: 'OldGetDataTest',
     component: () => import("../view/OldGetData.vue")
+},
+{
+    path: '/login',
+    name: '登录',
+    component: () => import('../view/Login.vue')
 }
 ]
 

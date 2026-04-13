@@ -6,9 +6,11 @@
           <el-input v-model="queryParams.name" placeholder="请输入员工姓名" />
         </el-form-item>
         <el-form-item label="性别">
-          <el-select v-model="queryParams.gender" placeholder="请选择" style="width: 120px">
+          <el-select v-model="queryParams.gender" placeholder="不选" style="width: 120px">
             <el-option label="男" value="1" />
             <el-option label="女" value="2" />
+            <!-- “:”是关键，表示这是JS类型null -->
+            <el-option label="不选" :value=null />
           </el-select>
         </el-form-item>
         <el-form-item label="入职时间">
@@ -24,7 +26,7 @@
         <el-form-item>
           <el-button type="primary" @click="performQuery">查询</el-button>
           <el-button @click="clearInput">清空</el-button>
-          <el-button type="primary" @click="getAllData">获取所有数据</el-button>
+          <el-button type="primary" @click="getAllData(true)">获取所有数据</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -39,7 +41,11 @@
       <el-table-column prop="name" label="姓名" width="100" />
       <el-table-column prop="userName" label="用户名" width="120" />
       <el-table-column prop="phone" label="手机号" width="120" />
-      <el-table-column prop="gender" label="性别" width="80" align="center" />
+      <el-table-column prop="gender" label="性别" width="80" align="center">
+        <template #default="scope">
+        {{ scope.row.gender === 1 ? '男' : (scope.row.gender === 2 ? '女' : '未知') }}
+        </template>
+      </el-table-column>
       <el-table-column label="头像" width="100" align="center">
         <template #default="scope">
           <el-image 
@@ -61,53 +67,16 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-dialog v-model="dialogVisible" title="新增员工" width="500px">
-  <el-form :model="form" label-width="100px">
-    <el-form-item label="姓名">
-      <el-input v-model="form.name" placeholder="请输入姓名" />
-    </el-form-item>
-    <el-form-item label="用户名">
-      <el-input v-model="form.userName" placeholder="请输入用户名" />
-    </el-form-item>
-    <el-form-item label="手机号">
-      <el-input v-model="form.phone" placeholder="请输入手机号" />
-    </el-form-item>
-    <el-form-item label="性别">
-      <el-radio-group v-model="form.gender">
-        <el-radio label="1">男</el-radio>
-        <el-radio label="2">女</el-radio>
-      </el-radio-group>
-    </el-form-item>
-    <el-form-item label="头像链接">
-      <el-input v-model="form.avatarUrl" placeholder="请输入图片URL地址" />
-    </el-form-item>
-    <el-form-item label="所属部门">
-      <el-select v-model="form.department" placeholder="请选择部门" style="width: 100%">
-        <el-option label="技术部" value="技术部" />
-        <el-option label="市场部" value="市场部" />
-        <el-option label="人事部" value="人事部" />
-      </el-select>
-    </el-form-item>
-    <el-form-item label="职位">
-      <el-input v-model="form.jobTitle" placeholder="请输入职位" />
-    </el-form-item>
-    <el-form-item label="入职日期">
-      <el-date-picker
-        v-model="form.entryDate"
-        type="date"
-        placeholder="选择日期"
-        value-format="YYYY-MM-DD"
-        style="width: 100%"
-      />
-    </el-form-item>
-  </el-form>
-  <template #footer>
-    <span class="dialog-footer">
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="confirmAdd">确定</el-button>
-    </span>
-  </template>
-</el-dialog>
+  </div>
+
+  <div class="container">
+    <EmployeeDialog
+      v-model="dialogVisible" 
+      :initialData="currentData"
+      :title="dialogTitle"
+      :is-add-employ="isAddEmploy"
+      @success="getAllData" 
+    />
   </div>
 </template>
 
@@ -120,20 +89,41 @@ import { ref, reactive } from 'vue'
 // 提示组件
 import { ElMessage } from 'element-plus'
 // 这样才能正确导入模块
-import { EmployeeForm } from '@/scripts/employeeInterface'
+import { EmployeeForm, QueryParam } from '@/interface/employeeInterface'
+import EmployeeDialog from './dialog/AddEmployeeDialog.vue'
 
 // 查询参数，reactive是创建响应式对象，确保数据变了其他地方也能变
-const queryParams = reactive({
+const queryParams = reactive<QueryParam>({
   name: '',
-  gender: '',
+  gender: null,
+  // 形如['2023-01-01', '2023-12-31']这样的数组
   dateRange: []
 })
+// 新增员工页面的表单数据模型
+const form = reactive<EmployeeForm>({
+  userName: '',
+  name: '',
+  phone: '',
+  gender: null,
+  avatarUrl: '',
+  department: '',
+  jobTitle: '',
+  entryDate: ''
+});
 
-// 模拟数据（对应插入 SQL 的数据）
+// 用户已经选择的id列表
+const selectedEmployees = ref<any[]>([])
+
+// SQL插入数据
 const employeeList = ref([]);
 // 加载动画
 const loading = ref(false);
-const dialogVisible = ref(false)
+// 那个增加员工的对话框
+const dialogVisible = ref(false);
+const editData = ref({});
+const dialogTitle = ref("我是标题");
+const currentData = ref({});
+const isAddEmploy = ref(false);
 
 const performQuery = async () => { 
     console.log("开始查询");
@@ -142,18 +132,22 @@ const performQuery = async () => {
     // 构建符合后端EmployeeQuery结构的DTO对象
     const queryDto = {
       name: queryParams.name || null,
-      gender: queryParams.gender ? parseInt(queryParams.gender) : null, 
-      startDate: (queryParams.dateRange && queryParams.dateRange.length > 0) ? queryParams.dateRange[0] : null
+      gender: queryParams.gender, 
+      startDate: (queryParams.dateRange && queryParams.dateRange.length > 0) ? queryParams.dateRange[0] : null,
+      endDate: (queryParams.dateRange && queryParams.dateRange.length > 1) ? queryParams.dateRange[1] : null
     }
 
     try {
       let response = await axios.post("http://localhost:8080/api/employees/search",queryDto);
       // await完成后才会执行下面的赋值指令
-      employeeList.value = response.data;
+      employeeList.value = response.data.data;
+      let result = response.data;
+      if (result.code === 1){
+        ElMessage("查询成功");
+      }
       loading.value = false;
     }
-    catch (error)
-    {
+    catch (error){
         console.log("查询失败");
     }
     finally{
@@ -161,47 +155,98 @@ const performQuery = async () => {
     }
  }
 
-// 新增页面的表单数据模型
-const form = reactive<EmployeeForm>({
-  name: '',
-  userName: '',
-  phone: '',
-  gender: '',
-  avatarUrl: '',
-  department: '',
-  jobTitle: '',
-  entryDate: ''
-});
-
 const clearInput = () => { 
   queryParams.name = '';
-  queryParams.gender = '';
+  queryParams.gender = null;
   queryParams.dateRange = [];
 }
 const handleAdd = () => {
-  // 重置表单，这样做是为了避免失去响应性特征
-  Object.assign(form, {
-    name: '', userName: '', phone: '', gender: '1',
-    avatar: '', department: '', jobTitle: '', entryDate: ''
-  })
+  // 重置表单
+  currentData.value = {name: '',
+    userName: '',
+    phone: '',
+    gender: 1, // 建议用数字，和数据库对齐
+    avatarUrl: '',
+    department: '',
+    jobTitle: '',
+    entryDate: ''
+    };
   // 弹出新增的页面
-  dialogVisible.value = true
+  dialogVisible.value = true;
+  dialogTitle.value = "新增员工";
+  isAddEmploy.value = true;
 }
-const handleBatchDelete = () => { /* 批量删除逻辑 */ }
-const handleEdit = (row) => { console.log('编辑行:', row) }
-const handleDelete = (row) => { console.log('删除行:', row) }
-const handleSelectionChange = (selection) => { /* 多选逻辑 */ }
-const getAllData = async() => {
+const handleBatchDelete = async () => {
+  if (selectedEmployees.value.length === 0){
+    ElMessage.warning("请至少勾选一个员工！");
+    return;
+  }
+
+  const selectedArray = selectedEmployees.value.map(row => row.id);
+  // 不使用for循环了，防止网络拥堵
+  try{
+    loading.value = true;
+    let response = await axios.post("http://localhost:8080/api/employees/batchDelete",selectedArray);
+    let result = response.data;
+    if (result.code === 1){
+      ElMessage.success("批量删除成功。");
+      getAllData(false);
+    }
+  }
+  catch (e){
+    console.log("删除失败，原因",e);
+    ElMessage.error("删除失败！");
+  }
+  finally{
+    loading.value = false
+  }
+}
+const handleEdit = (row:any) => {
+  isAddEmploy.value = false;
+  // 指针指向改变，因此我们需要在Dialog里面浅拷贝，使用浅拷贝的数据，否则就会出现显示的数据也变了的情况
+  currentData.value = row;
+  dialogVisible.value = true;
+  dialogTitle.value = "编辑员工...";
+}
+const handleDelete = async (row:any) => { 
+  // row就是那个JS对象，我们需要拿到他的id
+  // 由于后端加了@RequestBody，我们还是需要构造一个JSON
+  try{
+    let response = await axios.post("http://localhost:8080/api/employees/deleteById",row.id,{headers:{'Content-Type':'application/json'}});
+    // 或await axios.post("http://localhost:8080/api/employees/deleteById",{row.id});
+    let result = response.data;
+    if (result.code === 1){
+      ElMessage.success("删除成功");
+      getAllData(false);
+   }
+  }
+  catch(e){
+    console.log("删除失败",e);
+  }
+ }
+
+const handleSelectionChange = (selection:any) => {
+  console.log("勾选了：",selection);
+  selectedEmployees.value = selection
+}
+const getAllData = async(showSuccessDialog:boolean) => {
   console.log("获取所有数据");
   loading.value = true;
   try{
     const response = await axios.post("http://localhost:8080/api/employees/getAll")
-    employeeList.value = response.data;
+    // 第一层data是Result对象，第二层是真正的数据
+    employeeList.value = response.data.data;
+    const result = response.data;
+    if (result.code === 1 && showSuccessDialog == true)
+    {
+      ElMessage.success("获取成功");
+    }
   }
   catch (error)
   {
     console.error("获取数据失败",error);
   }
+  // finally不能省，否则这里的代码如果出问题就不会执行
   finally
   {
     loading.value = false;
@@ -212,19 +257,18 @@ const getAllData = async() => {
 const confirmAdd = async () => {
   console.log("提交的数据:", form)
   try {
-    // 假设后端接口为 /api/employees/add
+    // 后端接口为 /api/employees/add
     const response = await axios.post("http://localhost:8080/api/employees/add", form)
     
     ElMessage.success('新增成功！')
     dialogVisible.value = false // 关闭弹窗
-    getAllData() // 刷新列表数据
+    getAllData(false) // 刷新列表数据
   } catch (error) {
     console.error("新增失败", error)
     // 最上面的一个带动画的提示
     ElMessage.error('新增失败，请稍后再试')
   }
 }
-
 </script>
 
 <style scoped>

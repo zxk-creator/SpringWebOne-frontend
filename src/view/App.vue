@@ -7,7 +7,7 @@
 </script>
 
 <style>
-/* 建议加上这个，防止页面四周有白边 */
+/* 防止页面四周有白边 */
 body {
   margin: 0;
   padding: 0;
